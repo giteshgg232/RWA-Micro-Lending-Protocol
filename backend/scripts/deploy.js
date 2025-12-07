@@ -1,91 +1,89 @@
 const fs = require("fs");
 const path = require("path");
-const hre = require("hardhat");
 
 async function main() {
-  const [deployer] = await hre.ethers.getSigners();
-  console.log("🚀 Deploying contracts with:", deployer.address);
+  const [deployer] = await ethers.getSigners();
+  console.log("Deploying with:", deployer.address);
 
-  // -------------------------------
-  // 1. Deploy Mock USDC (ERC20)
-  // -------------------------------
-  const ERC20 = await hre.ethers.getContractFactory("ERC20PresetMinterPauser");
+  // ================= Deploy Contracts ==================
+  const ERC20 = await ethers.getContractFactory("ERC20PresetMinterPauser");
   const usdc = await ERC20.deploy("MockUSDC", "mUSDC");
   await usdc.deployed();
-  console.log("✔ MockUSDC deployed at:", usdc.address);
 
-  // -------------------------------
-  // 2. Deploy InvoiceNFT
-  // -------------------------------
-  const InvoiceNFT = await hre.ethers.getContractFactory("InvoiceNFT");
+  const InvoiceNFT = await ethers.getContractFactory("InvoiceNFT");
   const invoice = await InvoiceNFT.deploy(deployer.address);
   await invoice.deployed();
-  console.log("✔ InvoiceNFT deployed at:", invoice.address);
 
-  // -------------------------------
-  // 3. Deploy LoanManager (50 bps fee)
-  // -------------------------------
-  const LoanManager = await hre.ethers.getContractFactory("LoanManager");
+  const LoanManager = await ethers.getContractFactory("LoanManager");
   const loanManager = await LoanManager.deploy(
     invoice.address,
     usdc.address,
-    deployer.address,  // fee receiver
-    deployer.address,  // treasury
-    50                 // fee: 50 = 0.5%
+    deployer.address,
+    deployer.address,
+    50
   );
   await loanManager.deployed();
-  console.log("✔ LoanManager deployed at:", loanManager.address);
 
-  // -------------------------------
-  // 4. Deploy Pool
-  // -------------------------------
-  const Pool = await hre.ethers.getContractFactory("Pool");
-  const pool = await Pool.deploy(
-    usdc.address,
-    loanManager.address,
-    deployer.address
-  );
+  const Pool = await ethers.getContractFactory("Pool");
+  const pool = await Pool.deploy(usdc.address, loanManager.address, deployer.address);
   await pool.deployed();
-  console.log("✔ Pool deployed at:", pool.address);
 
-  // -------------------------------
-  // 5. Sync contract addresses to frontend
-  // -------------------------------
-  const addressesPath = path.join(__dirname, "../../frontend/lib/addresses.json");
+  // ================= Print addresses ==================
+  console.log("\n=== DEPLOYED ADDRESSES ===");
+  console.log("MockUSDC:", usdc.address);
+  console.log("InvoiceNFT:", invoice.address);
+  console.log("LoanManager:", loanManager.address);
+  console.log("Pool:", pool.address);
+  console.log("==========================\n");
 
-  const addresses = {
-    invoiceNFT: invoice.address,
-    loanManager: loanManager.address,
-    pool: pool.address,
-    stablecoin: usdc.address,
-    deployedAt: new Date().toISOString()
-  };
+  // ================= Write frontend configs ==================
+  const frontendDir = path.join(__dirname, "../../frontend/lib");
+  const abisDir = path.join(frontendDir, "abis");
 
-  fs.writeFileSync(addressesPath, JSON.stringify(addresses, null, 2));
-  console.log("📁 Saved frontend/lib/addresses.json");
-
-  // -------------------------------
-  // 6. Copy ABIs to frontend/lib/abis/
-  // -------------------------------
-  const abiDir = path.join(__dirname, "../../frontend/lib/abis");
-  if (!fs.existsSync(abiDir)) fs.mkdirSync(abiDir, { recursive: true });
-
-  const artifacts = [
-    { name: "InvoiceNFT", file: "InvoiceNFT.sol/InvoiceNFT.json" },
-    { name: "LoanManager", file: "LoanManager.sol/LoanManager.json" },
-    { name: "Pool", file: "Pool.sol/Pool.json" },
-    { name: "ERC20", file: "MockUSDC.sol/MockUSDC.json" }
-  ];
-
-  for (const a of artifacts) {
-    const source = path.join(__dirname, `../artifacts/contracts/${a.file}`);
-    const dest = path.join(abiDir, `${a.name}.json`);
-    fs.copyFileSync(source, dest);
-    console.log(`✔ Copied ABI: ${a.name}`);
+  if (!fs.existsSync(frontendDir)) {
+    console.log("Frontend folder missing:", frontendDir);
+    return;
   }
 
-  console.log("\n🎉 Deployment & ABI sync complete!");
-  console.log("Frontend is ready to use new contracts.\n");
+  console.log("✔ Frontend folder detected:", frontendDir);
+
+  fs.writeFileSync(
+    path.join(frontendDir, "addresses.json"),
+    JSON.stringify(
+      {
+        invoiceNFT: invoice.address,
+        loanManager: loanManager.address,
+        pool: pool.address,
+        stablecoin: usdc.address,
+        deployedAt: new Date().toISOString(),
+      },
+      null,
+      2
+    )
+  );
+  console.log("✔ Saved addresses.json");
+
+
+  const abiSources = {
+    InvoiceNFT: "contracts/InvoiceNFT.sol/InvoiceNFT.json",
+    LoanManager: "contracts/LoanManager.sol/LoanManager.json",
+    Pool: "contracts/Pool.sol/Pool.json",
+    ERC20: "@openzeppelin/contracts/token/ERC20/presets/ERC20PresetMinterPauser.sol/ERC20PresetMinterPauser.json",
+  };
+
+  for (const [name, localPath] of Object.entries(abiSources)) {
+    const src = path.join(__dirname, "../artifacts", localPath);
+    const dest = path.join(abisDir, `${name}.json`);
+
+    try {
+      fs.copyFileSync(src, dest);
+      console.log(`Copied ABI → ${name}.json`);
+    } catch (err) {
+      console.log(`Failed copying ${name}.json →`, err.message);
+    }
+  }
+
+  console.log("Deployment completed successfully!");
 }
 
 main().catch((err) => {

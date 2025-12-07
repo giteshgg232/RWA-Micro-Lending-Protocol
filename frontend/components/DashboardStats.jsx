@@ -1,126 +1,141 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { CONTRACTS } from '../lib/contracts';
-import { ethers } from 'ethers';
+import { useEffect, useState, useRef } from "react";
+import { ethers } from "ethers";
+import { CONTRACTS } from "../lib/contracts";
+import { motion } from "framer-motion";
+import { FiArrowUpRight, FiArrowDownRight, FiMinus } from "react-icons/fi";
 
 export default function DashboardStats() {
   const [stats, setStats] = useState({
-    totalLoans: 0,
-    requested: 0,
-    funding: 0,
-    funded: 0,
-    repaid: 0,
-    defaulted: 0,
+    totalLoans: 0, requested: 0, funding: 0, funded: 0, repaid: 0, defaulted: 0
   });
-  const [error, setError] = useState(null);
+
+  const [previousStats, setPreviousStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
 
   useEffect(() => {
     fetchStats();
-    const interval = setInterval(fetchStats, 5000);
-    return () => clearInterval(interval);
+    const it = setInterval(fetchStats, 5000);
+    return () => clearInterval(it);
   }, []);
 
-  async function getReadProvider() {
-    // Prefer a local JSON-RPC read provider to avoid MetaMask network mismatch.
+  async function provider() {
     try {
-      const rpc = (typeof window !== 'undefined' && window.location.hostname === 'localhost') ? 'http://127.0.0.1:8545' : (process.env.NEXT_PUBLIC_RPC || 'http://127.0.0.1:8545');
-      const jsonProvider = new ethers.providers.JsonRpcProvider(rpc);
-      // quick check: ensure provider responds
-      await jsonProvider.getBlockNumber();
-      return jsonProvider;
-    } catch (err) {
-      // fallback to injected provider (MetaMask) for reads
-      if (typeof window !== 'undefined' && window.ethereum) {
+      const rpc = process.env.NEXT_PUBLIC_RPC || "http://127.0.0.1:8545";
+      const p = new ethers.providers.JsonRpcProvider(rpc);
+      await p.getBlockNumber();
+      return p;
+    } catch (e) {
+      if (typeof window !== "undefined" && window.ethereum)
         return new ethers.providers.Web3Provider(window.ethereum);
-      }
-      throw new Error("No read provider available (no local node and no window.ethereum).");
+      throw e;
     }
   }
 
   async function fetchStats() {
     try {
-      setError(null);
+      setErr(null);
+      setLoading(true);
 
-      // --- Debug logs to help diagnose issues remotely ---
-      console.log("LoanManager address:", CONTRACTS.loanManager.address);
-      console.log("LoanManager ABI length:", CONTRACTS.loanManager.abi?.length);
-
-      // Use read-only provider to avoid MetaMask network mismatch
-      const provider = await getReadProvider();
-      const net = await provider.getNetwork();
-      console.log("Read provider network:", net);
-
-      // Check if the contract has code at that address (helps diagnose "no code" problems)
-      const code = await provider.getCode(CONTRACTS.loanManager.address);
-      console.log("Contract bytecode length:", code.length, code === "0x" ? "no code at address!" : "code found");
+      const p = await provider();
+      const code = await p.getCode(CONTRACTS.loanManager.address);
 
       if (code === "0x") {
-        setError(`No contract code at LoanManager address ${CONTRACTS.loanManager.address} on network ${net.name} (${net.chainId}). Make sure your frontend addresses.json matches the network your node is running on.`);
+        setErr("⚠ No contract deployed at loanManager address");
+        setLoading(false);
         return;
       }
 
-      // Instantiate contract with the ABI
       const contract = new ethers.Contract(
         CONTRACTS.loanManager.address,
         CONTRACTS.loanManager.abi,
-        provider
+        p
       );
 
-      // call the getter
-      const loanCountBN = await contract.loanCounter();
-      const loanCount = loanCountBN.toNumber ? loanCountBN.toNumber() : Number(loanCountBN);
+      const count = Number(await contract.loanCounter());
+      let s = { totalLoans: count, requested: 0, funding: 0, funded: 0, repaid: 0, defaulted: 0 };
 
-      let s = { totalLoans: loanCount, requested: 0, funding: 0, funded: 0, repaid: 0, defaulted: 0 };
-
-      for (let i = 1; i <= loanCount; i++) {
+      for (let i = 1; i <= count; i++) {
         const loan = await contract.loans(i);
-        // loan.state is probably a BigNumber or number - normalize
-        const state = typeof loan.state === 'object' && loan.state.toNumber ? loan.state.toNumber() : Number(loan.state);
-
-        if (state === 0) s.requested++;
-        else if (state === 1) s.funding++;
-        else if (state === 2) s.funded++;
-        else if (state === 3) s.repaid++;
-        else if (state === 4) s.defaulted++;
+        const st = Number(loan.state);
+        if (st === 0) s.requested++;
+        else if (st === 1) s.funding++;
+        else if (st === 2) s.funded++;
+        else if (st === 3) s.repaid++;
+        else if (st === 4) s.defaulted++;
       }
 
+      setPreviousStats(stats); // store before overwrite
       setStats(s);
-    } catch (err) {
-      console.error("fetchStats error:", err);
-      setError(String(err?.message || err));
+      setLoading(false);
+
+    } catch (e) {
+      console.error(e);
+      setErr(String(e));
+      setLoading(false);
     }
   }
 
   return (
-    <>
-      {error && (
-        <div className="card mb-4">
-          <strong className="text-red-600">Error:</strong>
-          <div className="text-sm text-gray-700">{error}</div>
-          <div className="text-xs text-gray-500 mt-2">
-            Tip: make sure Hardhat node is running (<code>npx hardhat node</code>) and that you deployed the contracts with the same node. If using MetaMask for writes, switch MetaMask network to "Localhost 8545".
-          </div>
+    <div className="space-y-4">
+
+      {/* ERROR */}
+      {err && (
+        <div className="p-3 bg-red-100 text-red-800 border border-red-300 rounded">
+          {err}
         </div>
       )}
 
+      {/* STATS GRID */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-        <StatCard label="Total Loans" value={stats.totalLoans} />
-        <StatCard label="Requested" value={stats.requested} />
-        <StatCard label="Funding" value={stats.funding} />
-        <StatCard label="Funded" value={stats.funded} />
-        <StatCard label="Repaid" value={stats.repaid} />
-        <StatCard label="Defaulted" value={stats.defaulted} />
+        <StatCard label="Total Loans" value={stats.totalLoans} prev={previousStats?.totalLoans} loading={loading} color="blue" />
+        <StatCard label="Requested" value={stats.requested} prev={previousStats?.requested} loading={loading} color="yellow" />
+        <StatCard label="Funding" value={stats.funding} prev={previousStats?.funding} loading={loading} color="purple" />
+        <StatCard label="Funded" value={stats.funded} prev={previousStats?.funded} loading={loading} color="green" />
+        <StatCard label="Repaid" value={stats.repaid} prev={previousStats?.repaid} loading={loading} color="emerald" />
+        <StatCard label="Defaulted" value={stats.defaulted} prev={previousStats?.defaulted} loading={loading} color="red" />
       </div>
-    </>
+    </div>
   );
 }
 
-function StatCard({ label, value }) {
+
+/* -------------------- Stat Card With Trend Arrow -------------------- */
+
+function StatCard({ label, value, prev, loading, color }) {
+  const trend = prev == null ? 0 : value - prev;
+
+  function TrendIcon() {
+    if (trend > 0)
+      return <span className="flex items-center text-green-600 text-sm"><FiArrowUpRight /> +{trend}</span>;
+
+    if (trend < 0)
+      return <span className="flex items-center text-red-600 text-sm"><FiArrowDownRight /> {trend}</span>;
+
+    return <span className="flex items-center text-gray-400 text-sm"></span>;
+  }
+
   return (
-    <div className="card text-center">
-      <p className="text-gray-500 text-sm">{label}</p>
-      <p className="text-xl font-bold">{value}</p>
+    <div className="p-4 bg-white rounded-xl shadow border border-gray-200 backdrop-blur">
+      <div className="flex justify-between items-center">
+        <p className="text-sm text-gray-500">{label}</p>
+        {!loading && <TrendIcon />}
+      </div>
+
+      {loading ? (
+        <div className="animate-pulse h-6 mt-2 rounded bg-gray-200 w-12"></div>
+      ) : (
+        <motion.p
+          key={value}
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`text-2xl font-bold text-${color}-600`}
+        >
+          {value}
+        </motion.p>
+      )}
     </div>
   );
 }

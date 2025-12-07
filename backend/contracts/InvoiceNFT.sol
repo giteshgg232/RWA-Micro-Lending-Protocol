@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
@@ -11,6 +10,7 @@ contract InvoiceNFT is ERC721URIStorage, AccessControl {
     Counters.Counter private _tokenIdCounter;
 
     bytes32 public constant ATTESTOR_ROLE = keccak256("ATTESTOR_ROLE");
+    bytes32 public constant ORACLE_ROLE = keccak256("ORACLE_ROLE");
 
     struct Invoice {
         uint256 amount;
@@ -27,6 +27,7 @@ contract InvoiceNFT is ERC721URIStorage, AccessControl {
 
     constructor(address admin) ERC721("InvoiceNFT", "INVO") {
         _setupRole(DEFAULT_ADMIN_ROLE, admin == address(0) ? msg.sender : admin);
+        _setupRole(ORACLE_ROLE, admin == address(0) ? msg.sender : admin);
     }
 
     function mintInvoice(
@@ -58,6 +59,15 @@ contract InvoiceNFT is ERC721URIStorage, AccessControl {
     }
 
     function verifyInvoice(uint256 tokenId) external onlyRole(ATTESTOR_ROLE) {
+        require(_exists(tokenId), "token not exists");
+        Invoice storage inv = _invoices[tokenId];
+        require(!inv.verified, "already verified");
+        inv.verified = true;
+        inv.attestor = msg.sender;
+        emit InvoiceVerified(tokenId, msg.sender);
+    }
+
+    function verifyInvoiceByOracle(uint256 tokenId) external onlyRole(ORACLE_ROLE) {
         require(_exists(tokenId), "token not exists");
         Invoice storage inv = _invoices[tokenId];
         require(!inv.verified, "already verified");
