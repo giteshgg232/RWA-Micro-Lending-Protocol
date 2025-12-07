@@ -28,7 +28,7 @@ Folders:
 ----
 
 ## Deployed Links:
--  1. Frontend : 
+-  1. Frontend : https://rwa-micro-lending-protocol.vercel.app/
 -  2. contracts: Pool: 0xEcbDE8275284779650056D7Ec994f859E7c296EC
                  LoanManager: 0xed1FDAB7E1A1D0B16009D3d518A6Dc5cF3758Ebf
                  MockUSDC: 0x540eC1E58c847B955eEA437B01AFa98177763F5E
